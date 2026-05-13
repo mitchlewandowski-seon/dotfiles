@@ -1,13 +1,5 @@
-# OS specific VARS
-case "$OSTYPE" in
-    darwin*)
-        EDITOR="zed"
-    ;;
-    linux*)
-        EDITOR="zeditor"
-esac
-[[ -n ${SSH_TTY} ]] && EDITOR="nvim"
-export EDITOR
+# editor
+export EDITOR="nvim"
 
 # LANGS
 LANG="en_US.UTF-8"
