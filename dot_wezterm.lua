@@ -10,7 +10,8 @@ config.initial_rows = 35
 -- config.font = wezterm.font("BlexMono Nerd Font Mono")
 config.font = wezterm.font({
 	-- family = "MonaspiceXe Nerd Font Mono",
-	family = "MonaspiceKr Nerd Font Mono",
+	-- family = "MonaspiceKr Nerd Font Mono",
+	family = "Maple Mono NF",
 	harfbuzz_features = {
 		"calt=1",
 		"ss01=1",
@@ -26,10 +27,15 @@ config.font = wezterm.font({
 	},
 })
 config.font_size = 15
-config.color_scheme = "Catppuccin Mocha"
+config.color_scheme = "Tokyo Night"
 config.window_frame = {
 	font_size = 14,
 }
+config.window_background_opacity = 0.9
 
 -- and finally, return the configuration to wezterm
+config.keys = {
+	{ key = "Enter", mods = "SHIFT", action = wezterm.action({ SendString = "\x1b\r" }) },
+}
+
 return config
