@@ -1,0 +1,270 @@
+if [[ -f "/opt/homebrew/bin/brew" ]] then
+  # If you're using macOS, you'll want this enabled
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+  [[ -d "/opt/homebrew/opt/ncurses/bin" ]] && export PATH="/opt/homebrew/opt/ncurses/bin:${PATH}"
+fi
+
+# Set the directory we want to store zinit and plugins
+ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
+
+# Download Zinit, if it's not there yet
+if [ ! -d "$ZINIT_HOME" ]; then
+   mkdir -p "$(dirname $ZINIT_HOME)"
+   git clone https://github.com/zdharma-continuum/zinit.git "$ZINIT_HOME"
+fi
+
+# Source/Load zinit
+source "${ZINIT_HOME}/zinit.zsh"
+
+# Add in zsh plugins
+zinit light zsh-users/zsh-syntax-highlighting
+zinit light zsh-users/zsh-completions
+zinit light zsh-users/zsh-autosuggestions
+zinit light Aloxaf/fzf-tab
+
+# Add in snippets
+zinit snippet OMZP::git
+zinit snippet OMZP::sudo
+zinit snippet OMZP::archlinux
+zinit snippet OMZP::command-not-found
+
+# Load completions
+autoload -Uz compinit && compinit
+
+zinit cdreplay -q
+
+# Keybindings
+bindkey -e
+bindkey '^p' history-search-backward
+bindkey '^n' history-search-forward
+bindkey '^[w' kill-region
+
+# History
+HISTSIZE=5000
+HISTFILE=~/.zsh_history
+SAVEHIST=$HISTSIZE
+HISTDUP=erase
+setopt appendhistory
+setopt sharehistory
+setopt hist_ignore_space
+setopt hist_ignore_all_dups
+setopt hist_save_no_dups
+setopt hist_ignore_dups
+setopt hist_find_no_dups
+
+# Completion styling
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
+zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+zstyle ':completion:*' menu no
+zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls --color $realpath'
+zstyle ':fzf-tab:complete:__zoxide_z:*' fzf-preview 'ls --color $realpath'
+
+# Aliases
+alias ls='ls --color'
+alias vim='nvim'
+alias c='clear'
+alias codex='codex -m gpt-5 -c model_reasoning_effort="high" --yolo'
+
+# Mise installation and activation function
+setup_mise() {
+  # Check if mise is installed in ~/.local/bin (where the installer puts it)
+  if [ ! -f "${HOME}/.local/bin/mise" ]; then
+    echo "mise not found, installing..."
+    curl https://mise.run | sh
+  fi
+
+  # Activate mise if it's now available
+  if [ -f "${HOME}/.local/bin/mise" ]; then
+    eval "$(${HOME}/.local/bin/mise activate zsh)"
+  else
+    echo "Failed to install or locate mise"
+  fi
+}
+
+# Language setup function using mise
+setup_langs() {
+  # Check if mise is available before proceeding
+  if [ ! -f "${HOME}/.local/bin/mise" ]; then
+    echo "mise not found, skipping language setup"
+    return 1
+  fi
+
+  echo "Setting up languages with mise..."
+  
+  # Install bun
+  if ! ${HOME}/.local/bin/mise list | grep -q "bun"; then
+    echo "Installing bun..."
+    ${HOME}/.local/bin/mise use -g bun@latest
+  fi
+  
+  # Install npm/node
+  if ! ${HOME}/.local/bin/mise list | grep -q "node"; then
+    echo "Installing node/npm..."
+    ${HOME}/.local/bin/mise use -g node@lts
+  fi
+  
+  # Install uv
+  if ! ${HOME}/.local/bin/mise list | grep -q "uv"; then
+    echo "Installing uv..."
+    ${HOME}/.local/bin/mise use -g uv@latest
+  fi
+  
+  # Install python
+  if ! ${HOME}/.local/bin/mise list | grep -q "python"; then
+    echo "Installing python..."
+    ${HOME}/.local/bin/mise use -g python@3.13
+  fi
+  
+  # Install go
+  if ! ${HOME}/.local/bin/mise list | grep -q "go"; then
+    echo "Installing go..."
+    ${HOME}/.local/bin/mise use -g go@latest
+  fi
+  
+  # Install ruby
+  if ! ${HOME}/.local/bin/mise list | grep -q "ruby"; then
+    echo "Installing ruby..."
+    ${HOME}/.local/bin/mise use -g ruby@3.4
+  fi
+  
+  echo "Language setup complete!"
+}
+
+# AI tools update function
+update_ai_tools() {
+  echo "Updating AI tools..."
+  
+  # Handle claude
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "Installing claude..."
+    if ! bun install -g @anthropic-ai/claude-code >/dev/null 2>&1; then
+      echo "Failed to install claude"
+      return 1
+    fi
+  else
+    echo "Updating claude..."
+    if ! claude update >/dev/null 2>&1; then
+      echo "Failed to update claude"
+      return 1
+    fi
+  fi
+
+  # Handle pi
+  if ! command -v pi >/dev/null 2>&1; then
+    echo "Installing pi..."
+    if ! npm install -g @mariozechner/pi-coding-agent >/dev/null 2>&1; then
+      echo "Failed to install pi"
+      return 1
+    fi
+  else
+    echo "Updating pi..."
+    if ! pi update >/dev/null 2>&1; then
+      echo "Failed to update pi package"
+      return 1
+    fi
+    if ! pi update >/dev/null 2>&1; then
+      echo "Failed to run pi update"
+      return 1
+    fi
+  fi
+
+  # Handle cursor agent
+  if ! command -v agent >/dev/null 2>&1; then
+    echo "Installing cursor agent..."
+    if ! curl https://cursor.com/install -fsS | bash >/dev/null 2>&1; then
+      echo "Failed to install cursor agent"
+      return 1
+    fi
+  else
+    echo "Updating cursor agent..."
+    if ! agent update >/dev/null 2>&1; then
+      echo "Failed to update cursor agent"
+      return 1
+    fi
+  fi
+
+  # Handle opencode
+  if ! command -v opencode >/dev/null 2>&1; then
+    echo "Installing opencode..."
+    if ! bun install -g opencode-ai >/dev/null 2>&1; then
+      echo "Failed to install opencode"
+      return 1
+    fi
+  else
+    echo "Updating opencode..."
+    if ! opencode upgrade >/dev/null 2>&1; then
+      echo "Failed to update opencode"
+      return 1
+    fi
+  fi
+  
+  # Install/update other AI tools
+  echo "Installing/updating codex..."
+  bun install -g @openai/codex >/dev/null 2>&1
+  
+  echo "Installing/updating qwen-code..."
+  npm install -g @qwen-code/qwen-code@latest >/dev/null 2>&1
+  
+  echo "Installing/updating gemini-cli..."
+  npm install -g @google/gemini-cli >/dev/null 2>&1
+  
+  echo "Installing/updating crush..."
+  npm install -g @charmland/crush >/dev/null 2>&1
+  
+  echo "Installing/updating ruler..."
+  bun install -g @intellectronica/ruler >/dev/null 2>&1
+  
+  echo "Installing/updating groq-code-cli..."
+  bun install -g groq-code-cli@latest >/dev/null 2>&1
+  
+  echo "AI tools update complete!"
+}
+
+# Ensure required CLI tools are available via Homebrew
+ensure_brew_tool() {
+  local binary="$1"
+  local formula="${2:-$1}"
+
+  if command -v "${binary}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v brew >/dev/null 2>&1; then
+    echo "${binary} not found, installing ${formula} with Homebrew..."
+    if ! brew list "${formula}" >/dev/null 2>&1; then
+      brew install "${formula}"
+    fi
+  else
+    echo "${binary} not found and Homebrew is unavailable; skipping install"
+  fi
+}
+
+# Run mise setup
+setup_mise
+
+# Optionally run language setup (uncomment to enable)
+# setup_langs
+
+# Optionally run AI tools update (uncomment to enable)
+# update_ai_tools
+
+# Ensure prompt dependencies are installed
+ensure_brew_tool "oh-my-posh"
+ensure_brew_tool "zoxide"
+ensure_brew_tool "fzf"
+
+# OMP
+if [ "$TERM_PROGRAM" != "Apple_Terminal" ]; then
+  eval "$(oh-my-posh init --config ~/.mytheme.omp.json zsh)"
+fi
+
+# Shell integrations
+eval "$(fzf --zsh)"
+eval "$(zoxide init --cmd cd zsh)"
+
+# Created by `pipx` on 2024-06-14 23:19:17
+export PATH="${HOME}/.local/bin:${HOME}/.bun/bin:${PATH}"
+
+# Added by LM Studio CLI (lms)
+export PATH="$PATH:/Users/mitch/.lmstudio/bin"
+# End of LM Studio CLI section
