@@ -130,94 +130,235 @@ setup_langs() {
   echo "Language setup complete!"
 }
 
+# AI tools version helpers
+typeset -g -a _ai_tool_names _ai_tool_before _ai_tool_after _ai_tool_status
+
+_normalize_ai_version() {
+  local ver="$1"
+  ver="${ver#crush version }"
+  ver="${ver#v}"
+  [[ "$ver" == codex-cli* ]] && ver="${ver#codex-cli }"
+  [[ "$ver" == *'('* ]] && ver="${ver%% \(*}"
+  ver="${ver%% *}"
+  echo "$ver"
+}
+
+_bun_pkg_version() {
+  local pkg="$1"
+  bun pm ls -g 2>/dev/null | grep "${pkg}@" | sed 's/.*@//' | head -1
+}
+
+_npm_pkg_version() {
+  local pkg="$1"
+  npm list -g "$pkg" 2>/dev/null | grep "${pkg}@" | sed 's/.*@//' | head -1
+}
+
+_ai_tool_version() {
+  local cmd="$1" pkg="$2" pm="$3"
+  local ver=""
+
+  if command -v "$cmd" >/dev/null 2>&1; then
+    ver=$(command "$cmd" --version 2>/dev/null | head -1)
+    ver=$(_normalize_ai_version "$ver")
+    [[ -n "$ver" && "$ver" != "unknown" ]] && { echo "$ver"; return }
+  fi
+
+  if [[ -n "$pkg" && -n "$pm" ]]; then
+    case "$pm" in
+      bun) ver=$(_bun_pkg_version "$pkg") ;;
+      npm) ver=$(_npm_pkg_version "$pkg") ;;
+    esac
+    [[ -n "$ver" ]] && { echo "$ver"; return }
+  fi
+
+  echo "—"
+}
+
+_ai_record_tool() {
+  local name="$1" before="$2" after="$3" ok="$4"
+  local tool_status
+  if [[ "$ok" != "0" ]]; then
+    tool_status="failed"
+  elif [[ "$before" == "—" && "$after" != "—" ]]; then
+    tool_status="installed"
+  elif [[ "$before" == "$after" ]]; then
+    tool_status="unchanged"
+  else
+    tool_status="updated"
+  fi
+  _ai_tool_names+=("$name")
+  _ai_tool_before+=("$before")
+  _ai_tool_after+=("$after")
+  _ai_tool_status+=("$tool_status")
+}
+
+_print_ai_tools_table() {
+  (( ${#_ai_tool_names[@]} == 0 )) && return
+  echo
+  printf '%-12s %-18s %-18s %s\n' "Tool" "Before" "After" "Status"
+  printf '%.0s─' {1..60}; echo
+  local i
+  for i in {1..${#_ai_tool_names[@]}}; do
+    printf '%-12s %-18s %-18s %s\n' \
+      "${_ai_tool_names[$i]}" "${_ai_tool_before[$i]}" \
+      "${_ai_tool_after[$i]}" "${_ai_tool_status[$i]}"
+  done
+  echo
+}
+
 # AI tools update function
 update_ai_tools() {
   echo "Updating AI tools..."
-  
+  _ai_tool_names=()
+  _ai_tool_before=()
+  _ai_tool_after=()
+  _ai_tool_status=()
+
+  local before after ok
+
   # Handle claude
-  if ! command -v claude >/dev/null 2>&1; then
+  before=$(_ai_tool_version claude @anthropic-ai/claude-code bun)
+  ok=0
+  if [[ "$before" == "—" ]]; then
     echo "Installing claude..."
     if ! bun install -g @anthropic-ai/claude-code >/dev/null 2>&1; then
       echo "Failed to install claude"
-      return 1
+      ok=1
     fi
   else
     echo "Updating claude..."
     if ! claude update >/dev/null 2>&1; then
       echo "Failed to update claude"
-      return 1
+      ok=1
     fi
   fi
+  after=$(_ai_tool_version claude @anthropic-ai/claude-code bun)
+  _ai_record_tool claude "$before" "$after" "$ok"
 
   # Handle pi
-  if ! command -v pi >/dev/null 2>&1; then
+  before=$(_ai_tool_version pi @mariozechner/pi-coding-agent npm)
+  ok=0
+  if [[ "$before" == "—" ]]; then
     echo "Installing pi..."
     if ! npm install -g @mariozechner/pi-coding-agent >/dev/null 2>&1; then
       echo "Failed to install pi"
-      return 1
+      ok=1
     fi
   else
     echo "Updating pi..."
     if ! pi update >/dev/null 2>&1; then
       echo "Failed to update pi package"
-      return 1
+      ok=1
     fi
     if ! pi update >/dev/null 2>&1; then
       echo "Failed to run pi update"
-      return 1
+      ok=1
     fi
   fi
+  after=$(_ai_tool_version pi @mariozechner/pi-coding-agent npm)
+  _ai_record_tool pi "$before" "$after" "$ok"
 
   # Handle cursor agent
-  if ! command -v agent >/dev/null 2>&1; then
+  before=$(_ai_tool_version agent)
+  ok=0
+  if [[ "$before" == "—" ]]; then
     echo "Installing cursor agent..."
     if ! curl https://cursor.com/install -fsS | bash >/dev/null 2>&1; then
       echo "Failed to install cursor agent"
-      return 1
+      ok=1
     fi
   else
     echo "Updating cursor agent..."
     if ! agent update >/dev/null 2>&1; then
       echo "Failed to update cursor agent"
-      return 1
+      ok=1
     fi
   fi
+  after=$(_ai_tool_version agent)
+  _ai_record_tool agent "$before" "$after" "$ok"
 
   # Handle opencode
-  if ! command -v opencode >/dev/null 2>&1; then
+  before=$(_ai_tool_version opencode opencode-ai bun)
+  ok=0
+  if [[ "$before" == "—" ]]; then
     echo "Installing opencode..."
     if ! bun install -g opencode-ai >/dev/null 2>&1; then
       echo "Failed to install opencode"
-      return 1
+      ok=1
     fi
   else
     echo "Updating opencode..."
     if ! opencode upgrade >/dev/null 2>&1; then
       echo "Failed to update opencode"
-      return 1
+      ok=1
     fi
   fi
-  
+  after=$(_ai_tool_version opencode opencode-ai bun)
+  _ai_record_tool opencode "$before" "$after" "$ok"
+
   # Install/update other AI tools
+  before=$(_ai_tool_version codex @openai/codex bun)
+  ok=0
   echo "Installing/updating codex..."
-  bun install -g @openai/codex >/dev/null 2>&1
-  
+  if ! bun install -g @openai/codex >/dev/null 2>&1; then
+    echo "Failed to install/update codex"
+    ok=1
+  fi
+  after=$(_ai_tool_version codex @openai/codex bun)
+  _ai_record_tool codex "$before" "$after" "$ok"
+
+  before=$(_ai_tool_version qwen @qwen-code/qwen-code npm)
+  ok=0
   echo "Installing/updating qwen-code..."
-  npm install -g @qwen-code/qwen-code@latest >/dev/null 2>&1
-  
+  if ! npm install -g @qwen-code/qwen-code@latest >/dev/null 2>&1; then
+    echo "Failed to install/update qwen-code"
+    ok=1
+  fi
+  after=$(_ai_tool_version qwen @qwen-code/qwen-code npm)
+  _ai_record_tool qwen "$before" "$after" "$ok"
+
+  before=$(_ai_tool_version gemini @google/gemini-cli npm)
+  ok=0
   echo "Installing/updating gemini-cli..."
-  npm install -g @google/gemini-cli >/dev/null 2>&1
-  
+  if ! npm install -g @google/gemini-cli >/dev/null 2>&1; then
+    echo "Failed to install/update gemini-cli"
+    ok=1
+  fi
+  after=$(_ai_tool_version gemini @google/gemini-cli npm)
+  _ai_record_tool gemini "$before" "$after" "$ok"
+
+  before=$(_ai_tool_version crush @charmland/crush npm)
+  ok=0
   echo "Installing/updating crush..."
-  npm install -g @charmland/crush >/dev/null 2>&1
-  
+  if ! npm install -g @charmland/crush >/dev/null 2>&1; then
+    echo "Failed to install/update crush"
+    ok=1
+  fi
+  after=$(_ai_tool_version crush @charmland/crush npm)
+  _ai_record_tool crush "$before" "$after" "$ok"
+
+  before=$(_ai_tool_version ruler @intellectronica/ruler bun)
+  ok=0
   echo "Installing/updating ruler..."
-  bun install -g @intellectronica/ruler >/dev/null 2>&1
-  
+  if ! bun install -g @intellectronica/ruler >/dev/null 2>&1; then
+    echo "Failed to install/update ruler"
+    ok=1
+  fi
+  after=$(_ai_tool_version ruler @intellectronica/ruler bun)
+  _ai_record_tool ruler "$before" "$after" "$ok"
+
+  before=$(_ai_tool_version groq groq-code-cli bun)
+  ok=0
   echo "Installing/updating groq-code-cli..."
-  bun install -g groq-code-cli@latest >/dev/null 2>&1
-  
+  if ! bun install -g groq-code-cli@latest >/dev/null 2>&1; then
+    echo "Failed to install/update groq-code-cli"
+    ok=1
+  fi
+  after=$(_ai_tool_version groq groq-code-cli bun)
+  _ai_record_tool groq "$before" "$after" "$ok"
+
   echo "AI tools update complete!"
+  _print_ai_tools_table
 }
 
 # Ensure required CLI tools are available via Homebrew
