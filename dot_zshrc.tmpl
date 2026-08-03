@@ -51,6 +51,7 @@ setopt hist_ignore_all_dups
 setopt hist_save_no_dups
 setopt hist_ignore_dups
 setopt hist_find_no_dups
+export HISTSIZE HISTFILE SAVEHIST HISTDUP
 
 # Completion styling
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
@@ -401,6 +402,9 @@ fi
 # Shell integrations
 eval "$(fzf --zsh)"
 eval "$(zoxide init --cmd cd zsh)"
+
+# grab litellm key
+export LITELLM_API_KEY='{{ onepasswordRead "op://seon/seon-preprod-litellm-testkey/credential" }}'
 
 # Created by `pipx` on 2024-06-14 23:19:17
 export PATH="${HOME}/.local/bin:${HOME}/.bun/bin:${PATH}"
