@@ -102,6 +102,12 @@ setup_langs() {
     echo "Installing node/npm..."
     ${HOME}/.local/bin/mise use -g node@lts
   fi
+
+  # Install pnpm
+  if ! ${HOME}/.local/bin/mise list | grep -q "pnpm"; then
+    echo "Installing pnpm..."
+    ${HOME}/.local/bin/mise use -g pnpm@latest
+  fi
   
   # Install uv
   if ! ${HOME}/.local/bin/mise list | grep -q "uv"; then
