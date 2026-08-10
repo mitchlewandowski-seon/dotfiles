@@ -416,7 +416,9 @@ export LITELLM_API_KEY='{{ onepasswordRead "op://seon/seon-preprod-litellm-testk
 export GOOGLE_OAUTH_CLIENT_ID='{{ onepasswordRead "op://seon/workspace_mcp/hostname" }}'
 export GOOGLE_OAUTH_CLIENT_SECRET='{{ onepasswordRead "op://seon/workspace_mcp/credential" }}'
 export FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY='{{ onepasswordRead "op://seon/workspace_mcp/jwt_signing_key" }}'
+export MCP_SINGLE_USER_MODE=1
 export OAUTHLIB_INSECURE_TRANSPORT=1
+export USER_GOOGLE_EMAIL='{{ onepasswordRead "op://seon/google/username" }}'
 
 # Created by `pipx` on 2024-06-14 23:19:17
 export PATH="${HOME}/.local/bin:${HOME}/.bun/bin:${PATH}"
