@@ -1,7 +1,17 @@
-if [[ -f "/opt/homebrew/bin/brew" ]] then
-  # If you're using macOS, you'll want this enabled
+export PATH="${HOME}/.local/bin:${HOME}/.bun/bin:${PATH}"
+export PATH="${PATH}:${HOME}/.lmstudio/bin"
+
+# Load Homebrew from its standard macOS or Linux location when available.
+if command -v brew >/dev/null 2>&1; then
+  eval "$(brew shellenv)"
+elif [[ -x "/opt/homebrew/bin/brew" ]]; then
   eval "$(/opt/homebrew/bin/brew shellenv)"
-  [[ -d "/opt/homebrew/opt/ncurses/bin" ]] && export PATH="/opt/homebrew/opt/ncurses/bin:${PATH}"
+elif [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+fi
+
+if [[ -n "${HOMEBREW_PREFIX:-}" && -d "${HOMEBREW_PREFIX}/opt/ncurses/bin" ]]; then
+  export PATH="${HOMEBREW_PREFIX}/opt/ncurses/bin:${PATH}"
 fi
 
 # Set the directory we want to store zinit and plugins
@@ -57,25 +67,31 @@ export HISTSIZE HISTFILE SAVEHIST HISTDUP
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
 zstyle ':completion:*' menu no
-zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls --color $realpath'
-zstyle ':fzf-tab:complete:__zoxide_z:*' fzf-preview 'ls --color $realpath'
+zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls -la $realpath'
+zstyle ':fzf-tab:complete:__zoxide_z:*' fzf-preview 'ls -la $realpath'
 
 # Aliases
-alias ls='ls --color'
+if [[ "$OSTYPE" == darwin* ]]; then
+  alias ls='ls -G'
+else
+  alias ls='ls --color=auto'
+fi
 alias vim='nvim'
 alias c='clear'
 
 # Mise installation and activation function
 setup_mise() {
   # Check if mise is installed in ~/.local/bin (where the installer puts it)
-  if [ ! -f "${HOME}/.local/bin/mise" ]; then
+  if [ ! -x "${HOME}/.local/bin/mise" ] && ! command -v mise >/dev/null 2>&1; then
     echo "mise not found, installing..."
     curl https://mise.run | sh
   fi
 
   # Activate mise if it's now available
-  if [ -f "${HOME}/.local/bin/mise" ]; then
+  if [ -x "${HOME}/.local/bin/mise" ]; then
     eval "$(${HOME}/.local/bin/mise activate zsh)"
+  elif command -v mise >/dev/null 2>&1; then
+    eval "$(mise activate zsh)"
   else
     echo "Failed to install or locate mise"
   fi
@@ -118,7 +134,7 @@ setup_langs() {
   # Install python
   if ! ${HOME}/.local/bin/mise list | grep -q "python"; then
     echo "Installing python..."
-    ${HOME}/.local/bin/mise use -g python@3.13
+    ${HOME}/.local/bin/mise use -g python@3.15
   fi
   
   # Install go
@@ -130,241 +146,66 @@ setup_langs() {
   # Install ruby
   if ! ${HOME}/.local/bin/mise list | grep -q "ruby"; then
     echo "Installing ruby..."
-    ${HOME}/.local/bin/mise use -g ruby@3.4
+    ${HOME}/.local/bin/mise use -g ruby@4
   fi
   
   echo "Language setup complete!"
 }
 
-# AI tools version helpers
-typeset -g -a _ai_tool_names _ai_tool_before _ai_tool_after _ai_tool_status
+# Install AI tools through mise. OpenCode stays on Bun on macOS.
+ensure_mise_settings() {
+  local expected='claude,codex,cursor-agent,herdr,opencode,pi'
+  local current raw
+  raw=$(mise settings get minimum_release_age_excludes 2>/dev/null) || raw=""
+  current=$(printf '%s\n' "$raw" | tr -d '[]"[:space:]' | tr ',' '\n' | sort | paste -sd, -)
 
-_normalize_ai_version() {
-  local ver="$1"
-  ver="${ver#crush version }"
-  ver="${ver#v}"
-  [[ "$ver" == codex-cli* ]] && ver="${ver#codex-cli }"
-  [[ "$ver" == *'('* ]] && ver="${ver%% \(*}"
-  ver="${ver%% *}"
-  echo "$ver"
-}
-
-_bun_pkg_version() {
-  local pkg="$1"
-  bun pm ls -g 2>/dev/null | grep "${pkg}@" | sed 's/.*@//' | head -1
-}
-
-_npm_pkg_version() {
-  local pkg="$1"
-  npm list -g "$pkg" 2>/dev/null | grep "${pkg}@" | sed 's/.*@//' | head -1
-}
-
-_ai_tool_version() {
-  local cmd="$1" pkg="$2" pm="$3"
-  local ver=""
-
-  if command -v "$cmd" >/dev/null 2>&1; then
-    ver=$(command "$cmd" --version 2>/dev/null | head -1)
-    ver=$(_normalize_ai_version "$ver")
-    [[ -n "$ver" && "$ver" != "unknown" ]] && { echo "$ver"; return }
+  if [[ "$current" != "$expected" ]]; then
+    mise settings set minimum_release_age_excludes "$expected"
   fi
+}
 
-  if [[ -n "$pkg" && -n "$pm" ]]; then
-    case "$pm" in
-      bun) ver=$(_bun_pkg_version "$pkg") ;;
-      npm) ver=$(_npm_pkg_version "$pkg") ;;
-    esac
-    [[ -n "$ver" ]] && { echo "$ver"; return }
+ensure_ai_tools() {
+  if ! command -v mise >/dev/null 2>&1; then
+    echo "mise is unavailable; skipping AI tool setup"
+    return 1
   fi
+  ensure_mise_settings || return 1
 
-  echo "—"
-}
-
-_ai_record_tool() {
-  local name="$1" before="$2" after="$3" ok="$4"
-  local tool_status
-  if [[ "$ok" != "0" ]]; then
-    tool_status="failed"
-  elif [[ "$before" == "—" && "$after" != "—" ]]; then
-    tool_status="installed"
-  elif [[ "$before" == "$after" ]]; then
-    tool_status="unchanged"
-  else
-    tool_status="updated"
+  local tools=(herdr@latest codex@latest claude@latest pi@latest cursor-agent@latest)
+  if [[ "$OSTYPE" != darwin* ]]; then
+    tools+=(opencode@latest)
   fi
-  _ai_tool_names+=("$name")
-  _ai_tool_before+=("$before")
-  _ai_tool_after+=("$after")
-  _ai_tool_status+=("$tool_status")
+  mise use --global --yes --fuzzy "${tools[@]}" || return 1
+
+  if [[ "$OSTYPE" == darwin* ]]; then
+    if ! command -v bun >/dev/null 2>&1; then
+      echo "bun is unavailable; skipping OpenCode installation"
+      return 1
+    fi
+    if ! bun pm ls -g 2>/dev/null | grep -Fq 'opencode-ai@'; then
+      echo "Installing opencode with Bun..."
+      bun install -g opencode-ai || return 1
+    fi
+  fi
 }
 
-_print_ai_tools_table() {
-  (( ${#_ai_tool_names[@]} == 0 )) && return
-  echo
-  printf '%-12s %-18s %-18s %s\n' "Tool" "Before" "After" "Status"
-  printf '%.0s─' {1..60}; echo
-  local i
-  for i in {1..${#_ai_tool_names[@]}}; do
-    printf '%-12s %-18s %-18s %s\n' \
-      "${_ai_tool_names[$i]}" "${_ai_tool_before[$i]}" \
-      "${_ai_tool_after[$i]}" "${_ai_tool_status[$i]}"
-  done
-  echo
-}
-
-# AI tools update function
 update_ai_tools() {
-  echo "Updating AI tools..."
-  _ai_tool_names=()
-  _ai_tool_before=()
-  _ai_tool_after=()
-  _ai_tool_status=()
+  if ! command -v mise >/dev/null 2>&1; then
+    echo "mise is unavailable; cannot update AI tools"
+    return 1
+  fi
 
-  local before after ok
-
-  # Handle claude
-  before=$(_ai_tool_version claude @anthropic-ai/claude-code bun)
-  ok=0
-  if [[ "$before" == "—" ]]; then
-    echo "Installing claude..."
-    if ! bun install -g @anthropic-ai/claude-code >/dev/null 2>&1; then
-      echo "Failed to install claude"
-      ok=1
+  if [[ "$OSTYPE" == darwin* ]]; then
+    mise up --exclude opencode || return 1
+    if command -v opencode >/dev/null 2>&1; then
+      opencode upgrade
+    else
+      echo "opencode is unavailable; install it with ensure_ai_tools first"
+      return 1
     fi
   else
-    echo "Updating claude..."
-    if ! claude update >/dev/null 2>&1; then
-      echo "Failed to update claude"
-      ok=1
-    fi
+    mise up
   fi
-  after=$(_ai_tool_version claude @anthropic-ai/claude-code bun)
-  _ai_record_tool claude "$before" "$after" "$ok"
-
-  # Handle pi
-  before=$(_ai_tool_version pi @mariozechner/pi-coding-agent npm)
-  ok=0
-  if [[ "$before" == "—" ]]; then
-    echo "Installing pi..."
-    if ! npm install -g @mariozechner/pi-coding-agent >/dev/null 2>&1; then
-      echo "Failed to install pi"
-      ok=1
-    fi
-  else
-    echo "Updating pi..."
-    if ! pi update >/dev/null 2>&1; then
-      echo "Failed to update pi package"
-      ok=1
-    fi
-    if ! pi update >/dev/null 2>&1; then
-      echo "Failed to run pi update"
-      ok=1
-    fi
-  fi
-  after=$(_ai_tool_version pi @mariozechner/pi-coding-agent npm)
-  _ai_record_tool pi "$before" "$after" "$ok"
-
-  # Handle cursor agent
-  before=$(_ai_tool_version agent)
-  ok=0
-  if [[ "$before" == "—" ]]; then
-    echo "Installing cursor agent..."
-    if ! curl https://cursor.com/install -fsS | bash >/dev/null 2>&1; then
-      echo "Failed to install cursor agent"
-      ok=1
-    fi
-  else
-    echo "Updating cursor agent..."
-    if ! agent update >/dev/null 2>&1; then
-      echo "Failed to update cursor agent"
-      ok=1
-    fi
-  fi
-  after=$(_ai_tool_version agent)
-  _ai_record_tool agent "$before" "$after" "$ok"
-
-  # Handle opencode
-  before=$(_ai_tool_version opencode opencode-ai bun)
-  ok=0
-  if [[ "$before" == "—" ]]; then
-    echo "Installing opencode..."
-    if ! bun install -g opencode-ai >/dev/null 2>&1; then
-      echo "Failed to install opencode"
-      ok=1
-    fi
-  else
-    echo "Updating opencode..."
-    if ! opencode upgrade >/dev/null 2>&1; then
-      echo "Failed to update opencode"
-      ok=1
-    fi
-  fi
-  after=$(_ai_tool_version opencode opencode-ai bun)
-  _ai_record_tool opencode "$before" "$after" "$ok"
-
-  # Install/update other AI tools
-  before=$(_ai_tool_version codex @openai/codex bun)
-  ok=0
-  echo "Installing/updating codex..."
-  if ! bun install -g @openai/codex >/dev/null 2>&1; then
-    echo "Failed to install/update codex"
-    ok=1
-  fi
-  after=$(_ai_tool_version codex @openai/codex bun)
-  _ai_record_tool codex "$before" "$after" "$ok"
-
-  before=$(_ai_tool_version qwen @qwen-code/qwen-code npm)
-  ok=0
-  echo "Installing/updating qwen-code..."
-  if ! npm install -g @qwen-code/qwen-code@latest >/dev/null 2>&1; then
-    echo "Failed to install/update qwen-code"
-    ok=1
-  fi
-  after=$(_ai_tool_version qwen @qwen-code/qwen-code npm)
-  _ai_record_tool qwen "$before" "$after" "$ok"
-
-  before=$(_ai_tool_version gemini @google/gemini-cli npm)
-  ok=0
-  echo "Installing/updating gemini-cli..."
-  if ! npm install -g @google/gemini-cli >/dev/null 2>&1; then
-    echo "Failed to install/update gemini-cli"
-    ok=1
-  fi
-  after=$(_ai_tool_version gemini @google/gemini-cli npm)
-  _ai_record_tool gemini "$before" "$after" "$ok"
-
-  before=$(_ai_tool_version crush @charmland/crush npm)
-  ok=0
-  echo "Installing/updating crush..."
-  if ! npm install -g @charmland/crush >/dev/null 2>&1; then
-    echo "Failed to install/update crush"
-    ok=1
-  fi
-  after=$(_ai_tool_version crush @charmland/crush npm)
-  _ai_record_tool crush "$before" "$after" "$ok"
-
-  before=$(_ai_tool_version ruler @intellectronica/ruler bun)
-  ok=0
-  echo "Installing/updating ruler..."
-  if ! bun install -g @intellectronica/ruler >/dev/null 2>&1; then
-    echo "Failed to install/update ruler"
-    ok=1
-  fi
-  after=$(_ai_tool_version ruler @intellectronica/ruler bun)
-  _ai_record_tool ruler "$before" "$after" "$ok"
-
-  before=$(_ai_tool_version groq groq-code-cli bun)
-  ok=0
-  echo "Installing/updating groq-code-cli..."
-  if ! bun install -g groq-code-cli@latest >/dev/null 2>&1; then
-    echo "Failed to install/update groq-code-cli"
-    ok=1
-  fi
-  after=$(_ai_tool_version groq groq-code-cli bun)
-  _ai_record_tool groq "$before" "$after" "$ok"
-
-  echo "AI tools update complete!"
-  _print_ai_tools_table
 }
 
 # Ensure required CLI tools are available via Homebrew
@@ -392,8 +233,10 @@ setup_mise
 # Optionally run language setup (uncomment to enable)
 # setup_langs
 
-# Optionally run AI tools update (uncomment to enable)
-# update_ai_tools
+# Ensure the AI tools are installed through mise (OpenCode uses Bun on macOS).
+ensure_ai_tools
+
+# Run update_ai_tools when you want to update all managed tools.
 
 # Ensure prompt dependencies are installed
 ensure_brew_tool "oh-my-posh"
@@ -401,13 +244,17 @@ ensure_brew_tool "zoxide"
 ensure_brew_tool "fzf"
 
 # OMP
-if [ "$TERM_PROGRAM" != "Apple_Terminal" ]; then
+if [ "$TERM_PROGRAM" != "Apple_Terminal" ] && command -v oh-my-posh >/dev/null 2>&1; then
   eval "$(oh-my-posh init --config ~/.mytheme.omp.json zsh)"
 fi
 
 # Shell integrations
-eval "$(fzf --zsh)"
-eval "$(zoxide init --cmd cd zsh)"
+if command -v fzf >/dev/null 2>&1; then
+  eval "$(fzf --zsh)"
+fi
+if command -v zoxide >/dev/null 2>&1; then
+  eval "$(zoxide init --cmd cd zsh)"
+fi
 
 # grab litellm key
 export LITELLM_API_KEY='{{ onepasswordRead "op://seon/seon-preprod-litellm-testkey/credential" }}'
@@ -419,10 +266,3 @@ export FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY='{{ onepasswordRead "op://seon
 export MCP_SINGLE_USER_MODE=1
 export OAUTHLIB_INSECURE_TRANSPORT=1
 export USER_GOOGLE_EMAIL='{{ onepasswordRead "op://seon/google/username" }}'
-
-# Created by `pipx` on 2024-06-14 23:19:17
-export PATH="${HOME}/.local/bin:${HOME}/.bun/bin:${PATH}"
-
-# Added by LM Studio CLI (lms)
-export PATH="$PATH:/Users/mitch/.lmstudio/bin"
-# End of LM Studio CLI section

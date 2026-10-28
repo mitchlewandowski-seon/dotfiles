@@ -1,0 +1,4 @@
+# Bash login shells should also load the interactive shell configuration.
+if [[ -f "${HOME}/.bashrc" ]]; then
+  source "${HOME}/.bashrc"
+fi

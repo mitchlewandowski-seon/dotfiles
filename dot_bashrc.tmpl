@@ -1,0 +1,215 @@
+# Keep Omarchy's bootstrap, interactive guard, and complete default Bash setup.
+if [[ -r /usr/share/omarchy/default/bash/env-bootstrap ]]; then
+  source /usr/share/omarchy/default/bash/env-bootstrap
+
+  # Match Omarchy's default .bashrc: do not load interactive configuration for
+  # scripts and other non-interactive shells.
+  [[ $- != *i* ]] && return
+fi
+
+# This profile owns the release-age exception list for these tools, without
+# rewriting mise's config on every shell startup.
+ensure_mise_settings() {
+  local expected='claude,codex,cursor-agent,herdr,opencode,pi'
+  local current raw
+  raw=$(mise settings get minimum_release_age_excludes 2>/dev/null) || raw=""
+  current=$(printf '%s\n' "$raw" | tr -d '[]"[:space:]' | tr ',' '\n' | sort | paste -sd, -)
+
+  if [[ "$current" != "$expected" ]]; then
+    mise settings set minimum_release_age_excludes "$expected"
+  fi
+}
+
+configure_user_environment() {
+  export CLAUDE_CODE_NO_FLICKER=1
+  export LITELLM_API_KEY='{{ onepasswordRead "op://seon/seon-preprod-litellm-testkey/credential" }}'
+  export GOOGLE_OAUTH_CLIENT_ID='{{ onepasswordRead "op://seon/workspace_mcp/hostname" }}'
+  export GOOGLE_OAUTH_CLIENT_SECRET='{{ onepasswordRead "op://seon/workspace_mcp/credential" }}'
+  export FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY='{{ onepasswordRead "op://seon/workspace_mcp/jwt_signing_key" }}'
+  export MCP_SINGLE_USER_MODE=1
+  export OAUTHLIB_INSECURE_TRANSPORT=1
+  export USER_GOOGLE_EMAIL='{{ onepasswordRead "op://seon/google/username" }}'
+}
+
+if [[ -n "${OMARCHY_PATH:-}" && -r "${OMARCHY_PATH}/default/bash/rc" ]]; then
+  source "${OMARCHY_PATH}/default/bash/rc"
+  ensure_mise_settings || echo "Could not configure mise release-age exclusions"
+  configure_user_environment
+  return
+fi
+
+# Non-Omarchy setup: retain the portable dotfiles configuration.
+# Add user-installed CLI tools to PATH.
+export PATH="${HOME}/.local/bin:${HOME}/.bun/bin:${PATH}"
+export PATH="${PATH}:${HOME}/.lmstudio/bin"
+
+# Load Homebrew from its standard macOS or Linux location when available.
+if command -v brew >/dev/null 2>&1; then
+  eval "$(brew shellenv)"
+elif [[ -x "/opt/homebrew/bin/brew" ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+fi
+
+if [[ -n "${HOMEBREW_PREFIX:-}" && -d "${HOMEBREW_PREFIX}/opt/ncurses/bin" ]]; then
+  export PATH="${HOMEBREW_PREFIX}/opt/ncurses/bin:${PATH}"
+fi
+
+export EDITOR="nvim"
+export CLAUDE_CODE_NO_FLICKER=1
+export LANG="${LANG:-en_US.UTF-8}"
+
+# History
+HISTSIZE=5000
+HISTFILESIZE=10000
+HISTCONTROL=ignoreboth:erasedups
+shopt -s histappend
+
+# Completion, when the system or Homebrew package is installed.
+if [[ -r /usr/share/bash-completion/bash_completion ]]; then
+  source /usr/share/bash-completion/bash_completion
+elif [[ -n "${HOMEBREW_PREFIX:-}" && -r "${HOMEBREW_PREFIX}/etc/bash_completion" ]]; then
+  source "${HOMEBREW_PREFIX}/etc/bash_completion"
+fi
+[[ -r "${HOME}/.bash_completion" ]] && source "${HOME}/.bash_completion"
+
+# Aliases
+if [[ "${OSTYPE:-}" == darwin* ]]; then
+  alias ls='ls -G'
+else
+  alias ls='ls --color=auto'
+fi
+alias vim='nvim'
+alias c='clear'
+
+setup_mise() {
+  local mise_bin="${HOME}/.local/bin/mise"
+  if [[ ! -x "$mise_bin" ]] && ! command -v mise >/dev/null 2>&1; then
+    echo "mise not found, installing..."
+    curl https://mise.run | sh
+  fi
+
+  if [[ -x "$mise_bin" ]]; then
+    eval "$("$mise_bin" activate bash)"
+  elif command -v mise >/dev/null 2>&1; then
+    eval "$(mise activate bash)"
+  else
+    echo "Failed to install or locate mise"
+  fi
+}
+
+setup_langs() {
+  local mise_bin="${HOME}/.local/bin/mise"
+  if [[ ! -x "$mise_bin" ]] && ! command -v mise >/dev/null 2>&1; then
+    echo "mise not found, skipping language setup"
+    return 1
+  fi
+  local mise_cmd=(mise)
+  [[ -x "$mise_bin" ]] && mise_cmd=("$mise_bin")
+
+  echo "Setting up languages with mise..."
+  local tool installed
+  for tool in bun node pnpm uv python go ruby; do
+    if ! "${mise_cmd[@]}" list | grep -q "$tool"; then
+      case "$tool" in
+        bun) installed=bun@latest ;;
+        node) installed=node@lts ;;
+        pnpm) installed=pnpm@latest ;;
+        uv) installed=uv@latest ;;
+        python) installed=python@3.15 ;;
+        go) installed=go@latest ;;
+        ruby) installed=ruby@4 ;;
+      esac
+      echo "Installing ${tool}..."
+      "${mise_cmd[@]}" use -g "$installed"
+    fi
+  done
+  echo "Language setup complete!"
+}
+
+ensure_ai_tools() {
+  if ! command -v mise >/dev/null 2>&1; then
+    echo "mise is unavailable; skipping AI tool setup"
+    return 1
+  fi
+  ensure_mise_settings || return 1
+
+  local tools=(herdr@latest codex@latest claude@latest pi@latest cursor-agent@latest)
+  if [[ "${OSTYPE:-}" != darwin* ]]; then
+    tools+=(opencode@latest)
+  fi
+  mise use --global --yes --fuzzy "${tools[@]}" || return 1
+
+  if [[ "${OSTYPE:-}" == darwin* ]]; then
+    if ! command -v bun >/dev/null 2>&1; then
+      echo "bun is unavailable; skipping OpenCode installation"
+      return 1
+    fi
+    if ! bun pm ls -g 2>/dev/null | grep -Fq 'opencode-ai@'; then
+      echo "Installing opencode with Bun..."
+      bun install -g opencode-ai || return 1
+    fi
+  fi
+}
+
+update_ai_tools() {
+  if ! command -v mise >/dev/null 2>&1; then
+    echo "mise is unavailable; cannot update AI tools"
+    return 1
+  fi
+
+  if [[ "${OSTYPE:-}" == darwin* ]]; then
+    mise up --exclude opencode || return 1
+    if command -v opencode >/dev/null 2>&1; then
+      opencode upgrade
+    else
+      echo "opencode is unavailable; install it with ensure_ai_tools first"
+      return 1
+    fi
+  else
+    mise up
+  fi
+}
+
+ensure_brew_tool() {
+  local binary="$1"
+  local formula="${2:-$1}"
+  command -v "$binary" >/dev/null 2>&1 && return 0
+
+  if command -v brew >/dev/null 2>&1; then
+    echo "${binary} not found, installing ${formula} with Homebrew..."
+    brew list "$formula" >/dev/null 2>&1 || brew install "$formula"
+  else
+    echo "${binary} not found and Homebrew is unavailable; skipping install"
+  fi
+}
+
+# Activate mise if it is installed (or install it, matching the Zsh profile).
+setup_mise
+
+# Optional language setup helper:
+# setup_langs
+
+# Ensure AI tools are installed through mise (OpenCode uses Bun on macOS).
+ensure_ai_tools
+
+# Run update_ai_tools when you want to update all managed tools.
+
+# Install these via Homebrew when available; on Linux without Homebrew,
+# install them with the system package manager or the upstream installer.
+ensure_brew_tool oh-my-posh
+ensure_brew_tool zoxide
+ensure_brew_tool fzf
+
+if [[ "${TERM_PROGRAM:-}" != "Apple_Terminal" ]] && command -v oh-my-posh >/dev/null 2>&1; then
+  eval "$(oh-my-posh init --config ~/.mytheme.omp.json bash)"
+fi
+if command -v fzf >/dev/null 2>&1; then
+  eval "$(fzf --bash)"
+fi
+if command -v zoxide >/dev/null 2>&1; then
+  eval "$(zoxide init --cmd cd bash)"
+fi
+
+configure_user_environment
