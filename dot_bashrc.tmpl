@@ -22,7 +22,7 @@ ensure_mise_settings() {
 
 configure_user_environment() {
   export CLAUDE_CODE_NO_FLICKER=1
-  export LITELLM_API_KEY='{{ onepasswordRead "op://seon/seon-preprod-litellm-testkey/credential" }}'
+  export LITELLM_API_KEY='{{ onepasswordRead "op://seon/seon-prod-litellm-key/credential" }}'
   export GOOGLE_OAUTH_CLIENT_ID='{{ onepasswordRead "op://seon/workspace_mcp/hostname" }}'
   export GOOGLE_OAUTH_CLIENT_SECRET='{{ onepasswordRead "op://seon/workspace_mcp/credential" }}'
   export FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY='{{ onepasswordRead "op://seon/workspace_mcp/jwt_signing_key" }}'
