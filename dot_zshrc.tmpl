@@ -257,7 +257,7 @@ if command -v zoxide >/dev/null 2>&1; then
 fi
 
 # grab litellm key
-export LITELLM_API_KEY='{{ onepasswordRead "op://seon/seon-preprod-litellm-testkey/credential" }}'
+export LITELLM_API_KEY='{{ onepasswordRead "op://seon/seon-prod-litellm-key/credential" }}'
 
 # grab google cloud mcp details
 export GOOGLE_OAUTH_CLIENT_ID='{{ onepasswordRead "op://seon/workspace_mcp/hostname" }}'
